@@ -15,7 +15,7 @@ class TrajManager:
         '''
         self.which_dataset = which_dataset
         self.dataset_path = dataset_path
-
+        # 获取真值
         if self.which_dataset == "tum":
             self.gt_poses = self.tum_load_poses(self.dataset_path + '/traj.txt')
         elif self.which_dataset == "replica":

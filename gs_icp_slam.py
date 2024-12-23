@@ -49,6 +49,7 @@ class GS_ICP_SLAM(SLAMParameters):
             rr.init("3dgsviewer")
             rr.spawn(connect=False)
         
+        # 相机内参等初始化
         camera_parameters_file = open(self.config)
         camera_parameters_ = camera_parameters_file.readlines()
         self.camera_parameters = camera_parameters_[2].split()
@@ -71,13 +72,16 @@ class GS_ICP_SLAM(SLAMParameters):
         
         # Make test cam
         # To get memory sizes of shared_cam
+        # 获取rgb图像和深度图
         test_rgb_img, test_depth_img = self.get_test_image(f"{self.dataset_path}/images")
+        # 转点云
         test_points, _, _, _ = self.downsample_and_make_pointcloud(test_depth_img, test_rgb_img)
 
         # Get size of final poses
+        # 位姿长度
         num_final_poses = len(self.trajmanager.gt_poses)
         
-        # Shared objects
+        # 分配内存
         self.shared_cam = SharedCam(FoVx=focal2fov(self.fx, self.W), FoVy=focal2fov(self.fy, self.H),
                                     image=test_rgb_img, depth_image=test_depth_img,
                                     cx=self.cx, cy=self.cy, fx=self.fx, fy=self.fy)
@@ -122,8 +126,10 @@ class GS_ICP_SLAM(SLAMParameters):
         processes = []
         for rank in range(2):
             if rank == 0:
+                # 跟踪线程
                 p = mp.Process(target=self.tracking, args=(rank, ))
             elif rank == 1:
+                # 建图线程
                 p = mp.Process(target=self.mapping, args=(rank, )) 
             p.start()
             processes.append(p)
@@ -131,7 +137,7 @@ class GS_ICP_SLAM(SLAMParameters):
             p.join()
 
     def get_test_image(self, images_folder):
-        
+        # 两种数据格式
         if self.camera_parameters[8] == "replica":
             images_folder = os.path.join(self.dataset_path, "images")
             image_files = os.listdir(images_folder)
@@ -195,6 +201,7 @@ class GS_ICP_SLAM(SLAMParameters):
         
         return pick_idxs, x_pre, y_pre
 
+    # 深度图+rgb图通过内参转成点云
     def downsample_and_make_pointcloud(self, depth_img, rgb_img):
         
         colors = torch.from_numpy(rgb_img).reshape(-1,3).float()[self.downsample_idxs]/255
@@ -229,10 +236,10 @@ class GS_ICP_SLAM(SLAMParameters):
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="dataset_path / output_path / verbose")
-    parser.add_argument("--dataset_path", help="dataset path", default="dataset/Replica/room0")
-    parser.add_argument("--config", help="caminfo", default="configs/Replica/caminfo.txt")
+    parser.add_argument("--dataset_path", help="dataset path", default="dataset/Replica/room0")   # 数据地址
+    parser.add_argument("--config", help="caminfo", default="configs/Replica/caminfo.txt")        # 相机内参等信息
     parser.add_argument("--output_path", help="output path", default="output/room0")
-    parser.add_argument("--keyframe_th", default=0.7)
+    parser.add_argument("--keyframe_th", default=0.7)                                             # 关键帧筛选阈值
     parser.add_argument("--knn_maxd", default=99999.0)
     parser.add_argument("--verbose", action='store_true', default=False)
     parser.add_argument("--demo", action='store_true', default=False)

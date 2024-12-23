@@ -17,9 +17,10 @@ from utils.traj_utils import TrajManager
 from gaussian_renderer import render, render_2, network_gui
 from tqdm import tqdm
 
-
+# 跟踪线程
 class Tracker(SLAMParameters):
     def __init__(self, slam):
+        # 从slam中获取相关参数
         super().__init__()
         self.dataset_path = slam.dataset_path
         self.output_path = slam.output_path
@@ -43,6 +44,7 @@ class Tracker(SLAMParameters):
         self.cy = slam.cy
         self.depth_scale = slam.depth_scale
         self.depth_trunc = slam.depth_trunc
+        # 相机内参
         self.cam_intrinsic = np.array([[self.fx, 0., self.cx],
                                        [0., self.fy, self.cy],
                                        [0.,0.,1]])
@@ -50,6 +52,7 @@ class Tracker(SLAMParameters):
         self.viewer_fps = slam.viewer_fps
         self.keyframe_freq = slam.keyframe_freq
         self.max_correspondence_distance = slam.max_correspondence_distance
+        # 配准
         self.reg = pygicp.FastGICP()
         
         # Camera poses
@@ -94,6 +97,7 @@ class Tracker(SLAMParameters):
         self.demo = slam.demo
         self.is_mapping_process_started = slam.is_mapping_process_started
     
+    # 外界slam调用run接口
     def run(self):
         self.tracking()
     
@@ -119,9 +123,10 @@ class Tracker(SLAMParameters):
             depth_image = self.depth_images.pop(0)
             current_image = cv2.cvtColor(current_image, cv2.COLOR_RGB2BGR)
                 
-            # Make pointcloud
+            # 根据图片和深度图转点云
             points, colors, z_values, trackable_filter = self.downsample_and_make_pointcloud2(depth_image, current_image)
             # GICP
+            # 首帧初始化
             if self.iteration_images == 0:
                 current_pose = self.poses[-1]
                 
@@ -152,8 +157,9 @@ class Tracker(SLAMParameters):
                 R = current_pose[:3,:3].transpose()
                 
                 # transform current points
+                # p` = Rp+t
                 points = np.matmul(R, points.transpose()).transpose() - np.matmul(R, T)
-                # Set initial pointcloud to target points
+                # 首帧, 初始化点云配准target
                 self.reg.set_input_target(points)
                 
                 num_trackable_points = trackable_filter.shape[0]
@@ -169,6 +175,7 @@ class Tracker(SLAMParameters):
                 scales = np.reshape(scales, (-1,3))
                 
                 # Assign first gaussian to shared memory
+                # 添加高斯
                 self.shared_new_gaussians.input_values(torch.tensor(points), torch.tensor(colors), 
                                                        torch.tensor(rots), torch.tensor(scales), 
                                                        torch.tensor(z_values), torch.tensor(trackable_filter))
@@ -188,10 +195,12 @@ class Tracker(SLAMParameters):
                     rr.set_time_seconds("log_time", time.time() - self.total_start_time)
                     rr.log(f"pt/trackable/{self.iteration_images}", rr.Points3D(points, colors=colors, radii=0.02))
             else:
+                # 非首帧, 需要配准
                 self.reg.set_input_source(points)
                 num_trackable_points = trackable_filter.shape[0]
                 input_filter = np.zeros(points.shape[0], dtype=np.int32)
                 input_filter[(trackable_filter)] = [range(1, num_trackable_points+1)]
+                # gicp中添加source
                 self.reg.set_source_filter(num_trackable_points, input_filter)
                 
                 initial_pose = self.poses[-1]
@@ -226,6 +235,7 @@ class Tracker(SLAMParameters):
                 R = current_pose[:3,:3].transpose()
 
                 # transform current points
+                # 旋转点云
                 points = np.matmul(R, points.transpose()).transpose() - np.matmul(R, T)
                 # Use only trackable points when tracking
                 target_corres, distances = self.reg.get_source_correspondence() # get associated points source points
@@ -233,7 +243,7 @@ class Tracker(SLAMParameters):
                 # Keyframe selection #
                 # Tracking keyframe
                 len_corres = len(np.where(distances<self.overlapped_th)[0]) # 5e-4 self.overlapped_th
-                
+                # 计算tracking关键帧
                 if  (self.iteration_images >= self.num_images-1 \
                     or len_corres/distances.shape[0] < self.keyframe_th):
                     if_tracking_keyframe = True
@@ -243,6 +253,7 @@ class Tracker(SLAMParameters):
                     self.from_last_tracking_keyframe += 1
                 
                 # Mapping keyframe
+                # 计算mappping关键帧
                 if (self.from_last_tracking_keyframe) % self.keyframe_freq == 0:
                     if_mapping_keyframe = True
                 else:
@@ -265,10 +276,12 @@ class Tracker(SLAMParameters):
                     
                     # Erase overlapped points from current pointcloud before adding to map gaussian #
                     # Using filter
+                    # 筛选非重叠的点云
                     not_overlapped_indices_of_trackable_points = self.eliminate_overlapped2(distances, self.overlapped_th2) # 5e-5 self.overlapped_th
                     trackable_filter = trackable_filter[not_overlapped_indices_of_trackable_points]
                     
                     # Add new gaussians
+                    # 添加到高斯中
                     self.shared_new_gaussians.input_values(torch.tensor(points), torch.tensor(colors), 
                                                        torch.tensor(rots), torch.tensor(scales), 
                                                        torch.tensor(z_values), torch.tensor(trackable_filter))
@@ -284,6 +297,7 @@ class Tracker(SLAMParameters):
                     while not self.target_gaussians_ready[0]:
                         time.sleep(1e-15)
                     target_points, target_rots, target_scales = self.shared_target_gaussians.get_values_np()
+                    # 更新配准地图
                     self.reg.set_input_target(target_points)
                     self.reg.set_target_covariances_fromqs(target_rots.flatten(), target_scales.flatten())
                     self.target_gaussians_ready[0] = 0
